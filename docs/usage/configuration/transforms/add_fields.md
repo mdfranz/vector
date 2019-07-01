@@ -89,6 +89,8 @@ The `add_fields` transforms accepts [`log`][docs.log_event] events and allows yo
 
 
 
+{% tabs %}
+{% tab title="Example" %}
 Given the following configuration:
 
 {% code-tabs %}
@@ -132,6 +134,10 @@ A [`log` event][docs.log_event] will be emitted with the following structure:
 {% endcode-tabs %}
 
 While unrealistic, this example demonstrates the various accepted [types][docs.config_value_types].
+
+{% endtab %}
+{% endtabs %}
+
 
 
 
