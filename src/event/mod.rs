@@ -8,7 +8,7 @@ use string_cache::DefaultAtom as Atom;
 
 pub mod metric;
 
-pub use metric::Metric;
+pub use {metric::Metric, metric::MetricPack};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/event.proto.rs"));
@@ -315,30 +315,14 @@ impl From<proto::EventWrapper> for Event {
             EventProto::Metric(proto) => {
                 let metric = proto.metric.unwrap();
                 match metric {
-                    MetricProto::Counter(counter) => {
-                        let sampling = if counter.sampling == 0f32 {
-                            None
-                        } else {
-                            Some(counter.sampling)
-                        };
-                        Event::Metric(Metric::Counter {
-                            name: counter.name,
-                            val: counter.val,
-                            sampling,
-                        })
-                    }
-                    MetricProto::Timer(timer) => {
-                        let sampling = if timer.sampling == 0f32 {
-                            None
-                        } else {
-                            Some(timer.sampling)
-                        };
-                        Event::Metric(Metric::Timer {
-                            name: timer.name,
-                            val: timer.val,
-                            sampling,
-                        })
-                    }
+                    MetricProto::Counter(counter) => Event::Metric(Metric::Counter {
+                        name: counter.name,
+                        val: counter.val,
+                    }),
+                    MetricProto::Timer(timer) => Event::Metric(Metric::Timer {
+                        name: timer.name,
+                        val: timer.val,
+                    }),
                     MetricProto::Gauge(gauge) => {
                         let direction = match gauge.direction() {
                             proto::gauge::Direction::None => None,
@@ -397,31 +381,15 @@ impl From<Event> for proto::EventWrapper {
 
                 proto::EventWrapper { event: Some(event) }
             }
-            Event::Metric(Metric::Counter {
-                name,
-                val,
-                sampling,
-            }) => {
-                let counter = proto::Counter {
-                    name,
-                    val,
-                    sampling: sampling.unwrap_or(0f32),
-                };
+            Event::Metric(Metric::Counter { name, val }) => {
+                let counter = proto::Counter { name, val };
                 let event = EventProto::Metric(proto::Metric {
                     metric: Some(MetricProto::Counter(counter)),
                 });
                 proto::EventWrapper { event: Some(event) }
             }
-            Event::Metric(Metric::Timer {
-                name,
-                val,
-                sampling,
-            }) => {
-                let timer = proto::Timer {
-                    name,
-                    val,
-                    sampling: sampling.unwrap_or(0f32),
-                };
+            Event::Metric(Metric::Timer { name, val }) => {
+                let timer = proto::Timer { name, val };
                 let event = EventProto::Metric(proto::Metric {
                     metric: Some(MetricProto::Timer(timer)),
                 });

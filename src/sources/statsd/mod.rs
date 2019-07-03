@@ -51,6 +51,7 @@ fn statsd(addr: SocketAddr, out: mpsc::Sender<Event>) -> super::Source {
                         .lines()
                         .map(parse)
                         .filter_map(|res| res.map_err(|e| error!("{}", e)).ok())
+                        .flat_map(|m| m.unpack())
                         .map(Event::Metric)
                         .collect::<Vec<_>>();
                     futures::stream::iter_ok::<_, std::io::Error>(metrics)

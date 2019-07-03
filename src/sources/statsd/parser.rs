@@ -1,4 +1,4 @@
-use crate::event::{metric::Direction, Metric};
+use crate::event::{metric::Direction, Metric, MetricPack};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::{
@@ -11,7 +11,7 @@ lazy_static! {
     static ref NONALPHANUM: Regex = Regex::new(r"[^a-zA-Z_\-0-9\.]").unwrap();
 }
 
-pub fn parse(packet: &str) -> Result<Metric, ParseError> {
+pub fn parse(packet: &str) -> Result<MetricPack, ParseError> {
     let key_and_body = packet.splitn(2, ":").collect::<Vec<_>>();
     if key_and_body.len() != 2 {
         return Err(ParseError::Malformed(
@@ -29,27 +29,33 @@ pub fn parse(packet: &str) -> Result<Metric, ParseError> {
     let metric_type = parts[1];
 
     let metric = match metric_type {
-        "c" => Metric::Counter {
-            name: sanitize_key(key),
-            val: parts[0].parse()?,
-            sampling: if let Some(s) = parts.get(2) {
-                Some(parse_sampling(s)?)
+        "c" => {
+            let count = if let Some(s) = parts.get(2) {
+                1.0 / sanitize_sampling(parse_sampling(s)?)
             } else {
-                None
-            },
-        },
-        "h" | "ms" => Metric::Timer {
-            name: sanitize_key(key),
-            val: parts[0].parse()?,
-            sampling: if let Some(s) = parts.get(2) {
-                Some(parse_sampling(s)?)
+                1.0
+            };
+            let val: f32 = parts[0].parse()?;
+            let metric = Metric::Counter {
+                name: sanitize_key(key),
+                val: val * count,
+            };
+            metric.pack(1)
+        }
+        "h" | "ms" => {
+            let metric = Metric::Timer {
+                name: sanitize_key(key),
+                val: parts[0].parse()?,
+            };
+            let count = if let Some(s) = parts.get(2) {
+                (1.0 / sanitize_sampling(parse_sampling(s)?)) as u32
             } else {
-                None
-            },
-        },
-        "g" => Metric::Gauge {
-            name: sanitize_key(key),
-            val: if parts[0]
+                1
+            };
+            metric.pack(count)
+        }
+        "g" => {
+            let val = if parts[0]
                 .chars()
                 .next()
                 .map(|c| c.is_ascii_digit())
@@ -58,13 +64,21 @@ pub fn parse(packet: &str) -> Result<Metric, ParseError> {
                 parts[0].parse()?
             } else {
                 parts[0][1..].parse()?
-            },
-            direction: parse_direction(parts[0])?,
-        },
-        "s" => Metric::Set {
-            name: sanitize_key(key),
-            val: parts[0].into(),
-        },
+            };
+            let metric = Metric::Gauge {
+                name: sanitize_key(key),
+                val,
+                direction: parse_direction(parts[0])?,
+            };
+            metric.pack(1)
+        }
+        "s" => {
+            let metric = Metric::Set {
+                name: sanitize_key(key),
+                val: parts[0].into(),
+            };
+            metric.pack(1)
+        }
         other => return Err(ParseError::UnknownMetricType(other.into())),
     };
     Ok(metric)
@@ -103,6 +117,14 @@ fn sanitize_key(key: &str) -> String {
     let s = WHITESPACE.replace_all(&s, "_");
     let s = NONALPHANUM.replace_all(&s, "");
     s.into()
+}
+
+fn sanitize_sampling(sampling: f32) -> f32 {
+    if sampling == 0.0 {
+        1.0
+    } else {
+        sampling
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -147,8 +169,8 @@ mod test {
             Ok(Metric::Counter {
                 name: "foo".into(),
                 val: 1.0,
-                sampling: None
-            }),
+            }
+            .pack(1)),
         );
     }
 
@@ -158,9 +180,21 @@ mod test {
             parse("bar:2|c|@0.1"),
             Ok(Metric::Counter {
                 name: "bar".into(),
+                val: 20.0,
+            }
+            .pack(1)),
+        );
+    }
+
+    #[test]
+    fn zero_sampled_counter() {
+        assert_eq!(
+            parse("bar:2|c|@0"),
+            Ok(Metric::Counter {
+                name: "bar".into(),
                 val: 2.0,
-                sampling: Some(0.1)
-            }),
+            }
+            .pack(1)),
         );
     }
 
@@ -171,8 +205,8 @@ mod test {
             Ok(Metric::Timer {
                 name: "glork".into(),
                 val: 320.0,
-                sampling: Some(0.1)
-            }),
+            }
+            .pack(10)),
         );
     }
 
@@ -184,7 +218,8 @@ mod test {
                 name: "gaugor".into(),
                 val: 333.0,
                 direction: None
-            }),
+            }
+            .pack(1)),
         );
     }
 
@@ -196,7 +231,8 @@ mod test {
                 name: "gaugor".into(),
                 val: 4.0,
                 direction: Some(Direction::Minus)
-            }),
+            }
+            .pack(1)),
         );
         assert_eq!(
             parse("gaugor:+10|g"),
@@ -204,7 +240,8 @@ mod test {
                 name: "gaugor".into(),
                 val: 10.0,
                 direction: Some(Direction::Plus)
-            }),
+            }
+            .pack(1)),
         );
     }
 
@@ -215,7 +252,8 @@ mod test {
             Ok(Metric::Set {
                 name: "uniques".into(),
                 val: "765".into(),
-            }),
+            }
+            .pack(1)),
         );
     }
 
